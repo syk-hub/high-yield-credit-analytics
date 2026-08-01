@@ -1,0 +1,102 @@
+from pathlib import Path
+
+import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+daily = pd.read_csv(
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "credit_market_daily.csv",
+    parse_dates=["Date"],
+)
+
+
+# Keep only observations with an HY OAS value.
+credit_data = daily.dropna(
+    subset=["HY_OAS_BPS"]
+).copy()
+
+
+# Select the latest available credit observation.
+latest = credit_data.iloc[-1]
+
+
+# Measure how unusual the current spread is.
+current_oas = latest["HY_OAS_BPS"]
+
+historical_percentile = (
+    credit_data["HY_OAS_BPS"]
+    .le(current_oas)
+    .mean()
+)
+
+
+# Classify the one-month direction.
+one_month_change = latest["HY_OAS_1M_CHANGE_BPS"]
+
+if pd.isna(one_month_change):
+    one_month_direction = "Unavailable"
+elif one_month_change > 10:
+    one_month_direction = "Deteriorating"
+elif one_month_change < -10:
+    one_month_direction = "Improving"
+else:
+    one_month_direction = "Broadly Stable"
+
+
+# Print the analytical summary.
+print()
+print("=" * 55)
+print("CURRENT HIGH-YIELD CREDIT MARKET SUMMARY")
+print("=" * 55)
+
+print(f"Observation date: {latest['Date'].date()}")
+print(f"HY OAS: {current_oas:.0f} bps")
+print(f"Credit regime: {latest['CREDIT_REGIME']}")
+
+print(
+    "Historical percentile: "
+    f"{historical_percentile:.1%}"
+)
+
+print(
+    "1-month OAS change: "
+    f"{one_month_change:+.0f} bps"
+)
+
+print(
+    "3-month OAS change: "
+    f"{latest['HY_OAS_3M_CHANGE_BPS']:+.0f} bps"
+)
+
+print(
+    "1-month credit direction: "
+    f"{one_month_direction}"
+)
+
+print("=" * 55)
+
+print()
+print("MARKET CONTEXT")
+print("-" * 55)
+
+print(f"Sample minimum OAS: {credit_data['HY_OAS_BPS'].min():.0f} bps")
+print(f"Sample median OAS : {credit_data['HY_OAS_BPS'].median():.0f} bps")
+print(f"Sample maximum OAS: {credit_data['HY_OAS_BPS'].max():.0f} bps")
+
+distance = current_oas - credit_data["HY_OAS_BPS"].median()
+
+print(f"Distance from median: {distance:+.0f} bps")
+
+print(
+    f"Worst 1M widening: "
+    f"{credit_data['HY_OAS_1M_CHANGE_BPS'].max():+.0f} bps"
+)
+
+print(
+    f"Best 1M tightening: "
+    f"{credit_data['HY_OAS_1M_CHANGE_BPS'].min():+.0f} bps"
+)
