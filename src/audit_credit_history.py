@@ -545,3 +545,33 @@ print(
         unemployment_check["UNEMPLOYMENT_RATE"].isna()
     ]
 )
+
+print()
+print("=" * 60)
+print("GILCHRIST-ZAKRAJSEK LONG-HISTORY AUDIT")
+print("=" * 60)
+
+gz_data = ebp_audit.copy()
+
+gz_data["date"] = pd.to_datetime(
+    gz_data["date"]
+)
+
+for column in ["ebp", "gz_spread", "est_prob"]:
+    gz_data[column] = pd.to_numeric(
+        gz_data[column],
+        errors="coerce",
+    )
+
+print(f"First observation: {gz_data['date'].min().date()}")
+print(f"Latest observation: {gz_data['date'].max().date()}")
+print(f"Total observations: {len(gz_data):,}")
+print(f"Duplicate dates: {gz_data['date'].duplicated().sum()}")
+
+print()
+print("Missing observations:")
+print(
+    gz_data[
+        ["ebp", "gz_spread", "est_prob"]
+    ].isna().sum()
+)
