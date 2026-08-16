@@ -410,3 +410,83 @@ print("DELTA EBP(t+1) ~ DELTA VIX(t)")
 print("=" * 60)
 
 print(lead_change_model.summary())
+
+
+# ------------------------------------------------------------
+# 10Y TREASURY / EBP CHANGE DIAGNOSTICS
+# ------------------------------------------------------------
+
+change_data = market_data[
+    [
+        "date",
+        "ebp",
+        "VIX",
+        "TREASURY_10Y",
+    ]
+].copy()
+
+change_data["delta_ebp"] = (
+    change_data["ebp"].diff()
+)
+
+change_data["delta_vix"] = (
+    change_data["VIX"].diff()
+)
+
+change_data["delta_treasury_10y"] = (
+    change_data["TREASURY_10Y"].diff()
+)
+
+change_data = change_data.dropna()
+
+print()
+print("=" * 60)
+print("10Y TREASURY / EBP CHANGE DIAGNOSTICS")
+print("=" * 60)
+
+print("Correlation matrix:")
+print(
+    change_data[
+        [
+            "delta_ebp",
+            "delta_vix",
+            "delta_treasury_10y",
+        ]
+    ].corr()
+)
+
+print()
+print("10Y Treasury monthly-change autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"Lag {lag:>2}: "
+        f"{change_data['delta_treasury_10y'].autocorr(lag=lag):.4f}"
+    )
+
+    # ------------------------------------------------------------
+# EBP changes: VIX + 10Y Treasury
+# ------------------------------------------------------------
+
+X_vix_treasury = sm.add_constant(
+    change_data[
+        [
+            "delta_vix",
+            "delta_treasury_10y",
+        ]
+    ]
+)
+
+vix_treasury_model = sm.OLS(
+    change_data["delta_ebp"],
+    X_vix_treasury,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("DELTA EBP ~ DELTA VIX + DELTA 10Y")
+print("=" * 60)
+
+print(vix_treasury_model.summary())
