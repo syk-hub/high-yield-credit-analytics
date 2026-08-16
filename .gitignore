@@ -9,3 +9,6 @@ data/raw/*
 !data/raw/.gitkeep
 
 src/download_fred_data_single_series_backup.py
+
+# Regenerable processed research datasets
+data/processed/*.csv

@@ -1,9 +1,7 @@
 from pathlib import Path
-
 import pandas as pd
-
 import statsmodels.api as sm
-
+from statsmodels.tsa.stattools import adfuller
 
 # ------------------------------------------------------------
 # Paths
@@ -200,3 +198,215 @@ print("GZ SPREAD ~ EBP + VIX")
 print("=" * 60)
 
 print(model.summary())
+
+# ------------------------------------------------------------
+# EBP time-series diagnostics
+# ------------------------------------------------------------
+
+ebp_series = market_data["ebp"].dropna()
+
+print()
+print("=" * 60)
+print("EBP TIME-SERIES DIAGNOSTICS")
+print("=" * 60)
+
+print(f"Observations: {len(ebp_series):,}")
+print(f"Mean: {ebp_series.mean():.4f}")
+print(f"Std. dev.: {ebp_series.std():.4f}")
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"Lag {lag:>2}: "
+        f"{ebp_series.autocorr(lag=lag):.4f}"
+    )
+
+adf_result = adfuller(
+    ebp_series,
+    autolag="AIC",
+)
+
+print()
+print("Augmented Dickey-Fuller test:")
+print(f"ADF statistic: {adf_result[0]:.4f}")
+print(f"p-value: {adf_result[1]:.4f}")
+print(f"Lags used: {adf_result[2]}")
+print(f"Observations used: {adf_result[3]}")
+
+# ------------------------------------------------------------
+# One-month-ahead EBP forecasting diagnostics
+# ------------------------------------------------------------
+
+forecast_data = market_data[
+    ["date", "ebp", "VIX"]
+].copy()
+
+# Target: next month's EBP
+forecast_data["ebp_next"] = (
+    forecast_data["ebp"].shift(-1)
+)
+
+forecast_data = forecast_data.dropna()
+
+
+def fit_hac_model(y, X):
+    X = sm.add_constant(X)
+
+    return sm.OLS(
+        y,
+        X,
+    ).fit(
+        cov_type="HAC",
+        cov_kwds={"maxlags": 3},
+    )
+
+
+# Model 1: persistence only
+model_1 = fit_hac_model(
+    forecast_data["ebp_next"],
+    forecast_data[["ebp"]],
+)
+
+# Model 2: VIX only
+model_2 = fit_hac_model(
+    forecast_data["ebp_next"],
+    forecast_data[["VIX"]],
+)
+
+# Model 3: persistence + VIX
+model_3 = fit_hac_model(
+    forecast_data["ebp_next"],
+    forecast_data[["ebp", "VIX"]],
+)
+
+
+print()
+print("=" * 60)
+print("ONE-MONTH-AHEAD EBP MODELS")
+print("=" * 60)
+
+print()
+print("MODEL 1 — EBP(t+1) ~ EBP(t)")
+print(model_1.summary())
+
+print()
+print("MODEL 2 — EBP(t+1) ~ VIX(t)")
+print(model_2.summary())
+
+print()
+print("MODEL 3 — EBP(t+1) ~ EBP(t) + VIX(t)")
+print(model_3.summary())
+
+# ------------------------------------------------------------
+# EBP change diagnostics
+# ------------------------------------------------------------
+
+change_data = market_data[
+    ["date", "ebp", "VIX"]
+].copy()
+
+change_data["delta_ebp"] = (
+    change_data["ebp"].diff()
+)
+
+change_data["delta_vix"] = (
+    change_data["VIX"].diff()
+)
+
+change_data = change_data.dropna()
+
+delta_ebp = change_data["delta_ebp"]
+
+print()
+print("=" * 60)
+print("DELTA EBP TIME-SERIES DIAGNOSTICS")
+print("=" * 60)
+
+print(f"Observations: {len(delta_ebp):,}")
+print(f"Mean: {delta_ebp.mean():.4f}")
+print(f"Std. dev.: {delta_ebp.std():.4f}")
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"Lag {lag:>2}: "
+        f"{delta_ebp.autocorr(lag=lag):.4f}"
+    )
+
+print()
+print("Correlation of monthly changes:")
+print(
+    change_data[
+        ["delta_ebp", "delta_vix"]
+    ].corr()
+)
+
+adf_delta = adfuller(
+    delta_ebp,
+    autolag="AIC",
+)
+
+print()
+print("ADF test — Delta EBP:")
+print(f"ADF statistic: {adf_delta[0]:.4f}")
+print(f"p-value: {adf_delta[1]:.4f}")
+print(f"Lags used: {adf_delta[2]}")
+
+# ------------------------------------------------------------
+# Contemporaneous EBP-change model
+# ------------------------------------------------------------
+
+X_change = sm.add_constant(
+    change_data[["delta_vix"]]
+)
+
+change_model = sm.OLS(
+    change_data["delta_ebp"],
+    X_change,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("DELTA EBP ~ DELTA VIX")
+print("=" * 60)
+
+print(change_model.summary())
+
+# ------------------------------------------------------------
+# One-month-ahead EBP-change test
+# ------------------------------------------------------------
+
+lead_change_data = change_data[
+    ["delta_ebp", "delta_vix"]
+].copy()
+
+# Target: next month's change in EBP
+lead_change_data["delta_ebp_next"] = (
+    lead_change_data["delta_ebp"].shift(-1)
+)
+
+lead_change_data = lead_change_data.dropna()
+
+X_lead = sm.add_constant(
+    lead_change_data[["delta_vix"]]
+)
+
+lead_change_model = sm.OLS(
+    lead_change_data["delta_ebp_next"],
+    X_lead,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("DELTA EBP(t+1) ~ DELTA VIX(t)")
+print("=" * 60)
+
+print(lead_change_model.summary())
