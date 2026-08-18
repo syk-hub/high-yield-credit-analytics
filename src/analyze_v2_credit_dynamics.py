@@ -15,6 +15,19 @@ SAMPLE_B_FILE = (
     / "v2_macro_credit_monthly.csv"
 )
 
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+
+FAILS_MONTHLY_PATH = (
+    RAW_DIR / "nyfed_corporate_fails_monthly.csv"
+)
+
+fails_monthly = pd.read_csv(
+    FAILS_MONTHLY_PATH,
+    parse_dates=["As Of Date"],
+)
 
 # ------------------------------------------------------------
 # Load research dataset
@@ -490,3 +503,244 @@ print("DELTA EBP ~ DELTA VIX + DELTA 10Y")
 print("=" * 60)
 
 print(vix_treasury_model.summary())
+
+# ------------------------------------------------------------
+# Corporate fails — monthly level diagnostics
+# ------------------------------------------------------------
+
+fails_series = (
+    fails_monthly[
+        "MONTHLY_MEAN_FAILS_TO_DELIVER_MILLIONS"
+    ]
+    .dropna()
+)
+
+print()
+print("=" * 60)
+print("CORPORATE FAILS - MONTHLY LEVEL DIAGNOSTICS")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(fails_series):,}")
+
+print()
+print("Summary:")
+print(fails_series.describe())
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"lag {lag}: "
+        f"{fails_series.autocorr(lag=lag):.4f}"
+    )
+
+from statsmodels.tsa.stattools import adfuller
+
+adf_result = adfuller(
+    fails_series,
+    autolag="AIC",
+)
+
+print()
+print(f"ADF statistic: {adf_result[0]:.4f}")
+print(f"ADF p-value: {adf_result[1]:.6f}")
+
+# ------------------------------------------------------------
+# Corporate fails - monthly change diagnostics
+# ------------------------------------------------------------
+
+fails_monthly["D_FAILS_DELIVER"] = (
+    fails_monthly[
+        "MONTHLY_MEAN_FAILS_TO_DELIVER_MILLIONS"
+    ]
+    .diff()
+)
+
+d_fails = (
+    fails_monthly["D_FAILS_DELIVER"]
+    .dropna()
+)
+
+print()
+print("=" * 60)
+print("CORPORATE FAILS - MONTHLY CHANGE DIAGNOSTICS")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(d_fails):,}")
+
+print()
+print("Summary:")
+print(d_fails.describe())
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"lag {lag}: "
+        f"{d_fails.autocorr(lag=lag):.4f}"
+    )
+
+adf_d_fails = adfuller(
+    d_fails,
+    autolag="AIC",
+)
+
+print()
+print(f"ADF statistic: {adf_d_fails[0]:.4f}")
+print(f"ADF p-value: {adf_d_fails[1]:.6f}")
+
+# ------------------------------------------------------------
+# Merge monthly corporate fails with EBP / VIX data
+# ------------------------------------------------------------
+
+fails_for_merge = fails_monthly[
+    [
+        "As Of Date",
+        "D_FAILS_DELIVER",
+    ]
+].copy()
+
+fails_for_merge = fails_for_merge.rename(
+    columns={
+        "As Of Date": "date",
+    }
+)
+
+# Normalize both to month-end timestamps
+change_data["date"] = (
+    pd.to_datetime(change_data["date"])
+    .dt.to_period("M")
+    .dt.to_timestamp("M")
+)
+
+fails_for_merge["date"] = (
+    pd.to_datetime(fails_for_merge["date"])
+    .dt.to_period("M")
+    .dt.to_timestamp("M")
+)
+
+intermediary_data = change_data.merge(
+    fails_for_merge,
+    on="date",
+    how="inner",
+    validate="one_to_one",
+)
+
+intermediary_data = intermediary_data.dropna(
+    subset=[
+        "delta_ebp",
+        "delta_vix",
+        "D_FAILS_DELIVER",
+    ]
+)
+
+print()
+print("=" * 60)
+print("EBP / VIX / CORPORATE FAILS - MERGE CHECK")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(intermediary_data):,}")
+
+print(
+    f"Date range: "
+    f"{intermediary_data['date'].min().date()} "
+    f"to {intermediary_data['date'].max().date()}"
+)
+
+print()
+print("Missing values:")
+print(
+    intermediary_data[
+        [
+            "delta_ebp",
+            "delta_vix",
+            "D_FAILS_DELIVER",
+        ]
+    ].isna().sum()
+)
+
+print()
+print("Correlation matrix:")
+print(
+    intermediary_data[
+        [
+            "delta_ebp",
+            "delta_vix",
+            "D_FAILS_DELIVER",
+        ]
+    ].corr()
+)
+
+# ------------------------------------------------------------
+# EBP ~ VIX + corporate fails
+# HAC regression on common sample
+# ------------------------------------------------------------
+
+X_intermediary = intermediary_data[
+    [
+        "delta_vix",
+        "D_FAILS_DELIVER",
+    ]
+]
+
+X_intermediary = sm.add_constant(
+    X_intermediary
+)
+
+y_intermediary = intermediary_data[
+    "delta_ebp"
+]
+
+model_intermediary = sm.OLS(
+    y_intermediary,
+    X_intermediary,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("HAC REGRESSION: DELTA EBP ~ DELTA VIX + DELTA FAILS")
+print("=" * 60)
+
+print()
+print(model_intermediary.summary())
+
+# ------------------------------------------------------------
+# Common-sample benchmark: EBP ~ VIX only
+# ------------------------------------------------------------
+
+X_vix_common = sm.add_constant(
+    intermediary_data[["delta_vix"]]
+)
+
+y_vix_common = intermediary_data["delta_ebp"]
+
+model_vix_common = sm.OLS(
+    y_vix_common,
+    X_vix_common,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("COMMON-SAMPLE HAC BENCHMARK: DELTA EBP ~ DELTA VIX")
+print("=" * 60)
+
+print()
+print(f"Observations: {int(model_vix_common.nobs)}")
+print(f"Delta VIX coefficient: {model_vix_common.params['delta_vix']:.6f}")
+print(f"Delta VIX p-value: {model_vix_common.pvalues['delta_vix']:.6f}")
+print(f"R-squared: {model_vix_common.rsquared:.6f}")
+
+print()
+print("Incremental R-squared from adding Delta Fails:")
+print(
+    f"{model_intermediary.rsquared - model_vix_common.rsquared:.6f}"
+)

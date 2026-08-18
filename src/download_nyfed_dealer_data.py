@@ -107,6 +107,31 @@ CORP_REPO_2022_GCF_TRI_URL = (
     "PDSORA-TRICD_PDSORA-TRICDTAL30_PDSORA-TRICDTAG30.csv"
 )
 
+CORP_FAILS_2001_URL = (
+    "https://markets.newyorkfed.org/api/pd/get/SBP2013/timeseries/"
+    "PDFASCFRA_PDFASCFDA.csv"
+)
+
+CORP_FAILS_2013_URL = (
+    "https://markets.newyorkfed.org/api/pd/get/SBN2013/timeseries/"
+    "PDFTR-CS_PDFTD-CS.csv"
+)
+
+CORP_FAILS_2015_URL = (
+    "https://markets.newyorkfed.org/api/pd/get/SBN2015/timeseries/"
+    "PDFTR-CS_PDFTD-CS.csv"
+)
+
+CORP_FAILS_2022_URL = (
+    "https://markets.newyorkfed.org/api/pd/get/SBN2022/timeseries/"
+    "PDFTR-CS_PDFTD-CS.csv"
+)
+
+CORP_FAILS_2024_URL = (
+    "https://markets.newyorkfed.org/api/pd/get/SBN2024/timeseries/"
+    "PDFTR-CS_PDFTD-CS.csv"
+)
+
 response.raise_for_status()
 
 data = pd.read_csv(
@@ -955,3 +980,548 @@ if len(fully_observed) > 0:
 #   Do not replace "*" with zero.
 #   Do not impute suppressed values.
 #   Do not splice this regime to the pre-2022 aggregate series.
+
+# ------------------------------------------------------------
+# Corporate securities fails — reporting-regime inspection
+# ------------------------------------------------------------
+
+print()
+print("=" * 60)
+print("NY FED CORPORATE SECURITIES FAILS — REGIME INSPECTION")
+print("=" * 60)
+
+corp_fails_urls = {
+    "2001–2013": CORP_FAILS_2001_URL,
+    "2013–2014": CORP_FAILS_2013_URL,
+    "2015–2021": CORP_FAILS_2015_URL,
+    "2022–JUN 2024": CORP_FAILS_2022_URL,
+    "JUL 2024+": CORP_FAILS_2024_URL,
+}
+
+for regime, url in corp_fails_urls.items():
+
+    response = requests.get(
+        url,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    df = pd.read_csv(
+        StringIO(response.text),
+        dtype={"Value (millions)": str},
+    )
+
+    df["As Of Date"] = pd.to_datetime(
+        df["As Of Date"]
+    )
+
+    numeric_values = pd.to_numeric(
+        df["Value (millions)"],
+        errors="coerce",
+    )
+
+    print()
+    print(regime)
+    print("-" * 60)
+
+    print(f"Rows: {len(df):,}")
+    print(f"Unique dates: {df['As Of Date'].nunique():,}")
+
+    print(
+        f"Date range: "
+        f"{df['As Of Date'].min().date()} "
+        f"to {df['As Of Date'].max().date()}"
+    )
+
+    print()
+    print("Series IDs:")
+    print(
+        df["Time Series"]
+        .value_counts()
+        .sort_index()
+    )
+
+    duplicates = df.duplicated(
+        subset=["As Of Date", "Time Series"],
+        keep=False,
+    ).sum()
+
+    print()
+    print(f"Duplicate series/date rows: {duplicates}")
+
+    series_per_date = (
+        df
+        .groupby("As Of Date")["Time Series"]
+        .nunique()
+    )
+
+    expected_series_count = df["Time Series"].nunique()
+
+    incomplete_dates = (
+        series_per_date != expected_series_count
+    ).sum()
+
+    print(
+        f"Dates with fewer than "
+        f"{expected_series_count} series: "
+        f"{incomplete_dates}"
+    )
+
+    non_numeric = df[
+        numeric_values.isna()
+    ].copy()
+
+    print(f"Non-numeric values: {len(non_numeric)}")
+
+    if len(non_numeric) > 0:
+
+        print()
+        print("Raw non-numeric values:")
+        print(
+            non_numeric["Value (millions)"]
+            .value_counts(dropna=False)
+        )
+
+        print()
+        print("Affected series:")
+        print(
+            non_numeric["Time Series"]
+            .value_counts()
+            .sort_index()
+        )
+
+    print()
+    print("First four rows:")
+    print(
+        df[
+            ["As Of Date", "Time Series", "Value (millions)"]
+        ]
+        .head(4)
+        .to_string(index=False)
+    )
+
+    print()
+    print("Last four rows:")
+    print(
+        df[
+            ["As Of Date", "Time Series", "Value (millions)"]
+        ]
+        .tail(4)
+        .to_string(index=False)
+    )
+
+    # ------------------------------------------------------------
+# Corporate securities fails — 2013 reporting-boundary check
+# ------------------------------------------------------------
+
+print()
+print("=" * 60)
+print("CORPORATE FAILS REPORTING BOUNDARY — 2013")
+print("=" * 60)
+
+for regime, url in {
+    "PRE-APRIL 2013": CORP_FAILS_2001_URL,
+    "APRIL 2013+": CORP_FAILS_2013_URL,
+}.items():
+
+    response = requests.get(
+        url,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    df = pd.read_csv(
+        StringIO(response.text)
+    )
+
+    df["As Of Date"] = pd.to_datetime(
+        df["As Of Date"]
+    )
+
+    df["Value (millions)"] = pd.to_numeric(
+        df["Value (millions)"],
+        errors="coerce",
+    )
+
+    wide = (
+        df
+        .pivot(
+            index="As Of Date",
+            columns="Time Series",
+            values="Value (millions)",
+        )
+        .sort_index()
+    )
+
+    print()
+    print(regime)
+    print("-" * 60)
+
+    if regime == "PRE-APRIL 2013":
+        print(wide.tail(8).to_string())
+    else:
+        print(wide.head(8).to_string())
+
+        # ------------------------------------------------------------
+# Corporate securities fails — standardized historical series
+# ------------------------------------------------------------
+
+def get_corporate_fails(
+    url,
+    receive_id,
+    deliver_id,
+    regime,
+):
+
+    response = requests.get(
+        url,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    df = pd.read_csv(
+        StringIO(response.text)
+    )
+
+    df["As Of Date"] = pd.to_datetime(
+        df["As Of Date"]
+    )
+
+    df["Value (millions)"] = pd.to_numeric(
+        df["Value (millions)"],
+        errors="coerce",
+    )
+
+    # Explicit economic mapping of NY Fed series IDs
+    mapping = {
+        receive_id: "CORP_FAILS_TO_RECEIVE_MILLIONS",
+        deliver_id: "CORP_FAILS_TO_DELIVER_MILLIONS",
+    }
+
+    df["Measure"] = df["Time Series"].map(mapping)
+
+    if df["Measure"].isna().any():
+        raise ValueError(
+            f"Unexpected series ID in {regime}"
+        )
+
+    wide = (
+        df
+        .pivot(
+            index="As Of Date",
+            columns="Measure",
+            values="Value (millions)",
+        )
+        .reset_index()
+    )
+
+    wide.columns.name = None
+
+    wide["REPORTING_REGIME"] = regime
+
+    return wide
+
+
+fails_2001 = get_corporate_fails(
+    CORP_FAILS_2001_URL,
+    receive_id="PDFASCFRA",
+    deliver_id="PDFASCFDA",
+    regime="2001-07_to_2013-03",
+)
+
+fails_2013 = get_corporate_fails(
+    CORP_FAILS_2013_URL,
+    receive_id="PDFTR-CS",
+    deliver_id="PDFTD-CS",
+    regime="2013-04_to_2014-12",
+)
+
+fails_2015 = get_corporate_fails(
+    CORP_FAILS_2015_URL,
+    receive_id="PDFTR-CS",
+    deliver_id="PDFTD-CS",
+    regime="2015-01_to_2021-12",
+)
+
+fails_2022 = get_corporate_fails(
+    CORP_FAILS_2022_URL,
+    receive_id="PDFTR-CS",
+    deliver_id="PDFTD-CS",
+    regime="2022-01_to_2024-06",
+)
+
+fails_2024 = get_corporate_fails(
+    CORP_FAILS_2024_URL,
+    receive_id="PDFTR-CS",
+    deliver_id="PDFTD-CS",
+    regime="2024-07_onward",
+)
+
+
+corp_fails = pd.concat(
+    [
+        fails_2001,
+        fails_2013,
+        fails_2015,
+        fails_2022,
+        fails_2024,
+    ],
+    ignore_index=True,
+)
+
+corp_fails = (
+    corp_fails
+    .sort_values("As Of Date")
+    .reset_index(drop=True)
+)
+
+
+# ------------------------------------------------------------
+# Final continuity validation
+# ------------------------------------------------------------
+
+print()
+print("=" * 60)
+print("CORPORATE SECURITIES FAILS — STANDARDIZED SERIES")
+print("=" * 60)
+
+print(f"Rows: {len(corp_fails):,}")
+print(
+    f"Date range: "
+    f"{corp_fails['As Of Date'].min().date()} "
+    f"to {corp_fails['As Of Date'].max().date()}"
+)
+
+print()
+print("Missing values:")
+print(
+    corp_fails[
+        [
+            "CORP_FAILS_TO_RECEIVE_MILLIONS",
+            "CORP_FAILS_TO_DELIVER_MILLIONS",
+        ]
+    ].isna().sum()
+)
+
+print()
+print("Duplicate dates:")
+print(
+    corp_fails["As Of Date"]
+    .duplicated()
+    .sum()
+)
+
+print()
+print("Observations by reporting regime:")
+print(
+    corp_fails["REPORTING_REGIME"]
+    .value_counts(sort=False)
+)
+
+print()
+print("First five:")
+print(corp_fails.head().to_string(index=False))
+
+print()
+print("Last five:")
+print(corp_fails.tail().to_string(index=False))
+
+# ------------------------------------------------------------
+# Corporate securities fails — relationship diagnostic
+# ------------------------------------------------------------
+
+print()
+print("=" * 60)
+print("CORPORATE SECURITIES FAILS — RECEIVE / DELIVER RELATIONSHIP")
+print("=" * 60)
+
+fails_corr = (
+    corp_fails[
+        [
+            "CORP_FAILS_TO_RECEIVE_MILLIONS",
+            "CORP_FAILS_TO_DELIVER_MILLIONS",
+        ]
+    ]
+    .corr()
+    .iloc[0, 1]
+)
+
+print()
+print(f"Level correlation: {fails_corr:.4f}")
+
+corp_fails["FAILS_GAP_MILLIONS"] = (
+    corp_fails["CORP_FAILS_TO_DELIVER_MILLIONS"]
+    - corp_fails["CORP_FAILS_TO_RECEIVE_MILLIONS"]
+)
+
+corp_fails["FAILS_DELIVER_RECEIVE_RATIO"] = (
+    corp_fails["CORP_FAILS_TO_DELIVER_MILLIONS"]
+    / corp_fails["CORP_FAILS_TO_RECEIVE_MILLIONS"]
+)
+
+print()
+print("Fails gap summary:")
+print(
+    corp_fails["FAILS_GAP_MILLIONS"]
+    .describe()
+)
+
+print()
+print("Deliver / Receive ratio summary:")
+print(
+    corp_fails["FAILS_DELIVER_RECEIVE_RATIO"]
+    .replace([float("inf"), -float("inf")], pd.NA)
+    .describe()
+)
+
+print()
+print("Largest absolute gaps:")
+print(
+    corp_fails.assign(
+        ABS_FAILS_GAP_MILLIONS=
+        corp_fails["FAILS_GAP_MILLIONS"].abs()
+    )
+    .nlargest(
+        10,
+        "ABS_FAILS_GAP_MILLIONS"
+    )[
+        [
+            "As Of Date",
+            "CORP_FAILS_TO_RECEIVE_MILLIONS",
+            "CORP_FAILS_TO_DELIVER_MILLIONS",
+            "FAILS_GAP_MILLIONS",
+            "REPORTING_REGIME",
+        ]
+    ]
+    .to_string(index=False)
+)
+
+# ------------------------------------------------------------
+# Corporate securities fails — change relationship
+# ------------------------------------------------------------
+
+corp_fails["D_FAILS_RECEIVE"] = (
+    corp_fails["CORP_FAILS_TO_RECEIVE_MILLIONS"].diff()
+)
+
+corp_fails["D_FAILS_DELIVER"] = (
+    corp_fails["CORP_FAILS_TO_DELIVER_MILLIONS"].diff()
+)
+
+change_corr = (
+    corp_fails[
+        [
+            "D_FAILS_RECEIVE",
+            "D_FAILS_DELIVER",
+        ]
+    ]
+    .corr()
+    .iloc[0, 1]
+)
+
+print()
+print("=" * 60)
+print("CORPORATE SECURITIES FAILS — WEEKLY CHANGE RELATIONSHIP")
+print("=" * 60)
+
+print()
+print(f"Change correlation: {change_corr:.4f}")
+
+print()
+print("Weekly change summary:")
+print(
+    corp_fails[
+        [
+            "D_FAILS_RECEIVE",
+            "D_FAILS_DELIVER",
+        ]
+    ]
+    .describe()
+)
+
+# ------------------------------------------------------------
+# Corporate fails — monthly aggregation
+# Primary measure: mean weekly Fails to Deliver
+# ------------------------------------------------------------
+
+corp_fails_monthly = (
+    corp_fails
+    .set_index("As Of Date")
+    ["CORP_FAILS_TO_DELIVER_MILLIONS"]
+    .resample("ME")
+    .agg(
+        MONTHLY_MEAN_FAILS_TO_DELIVER_MILLIONS="mean",
+        WEEKS_IN_MONTH="count",
+    )
+    .reset_index()
+)
+
+print()
+print("=" * 60)
+print("CORPORATE FAILS - MONTHLY FAILS TO DELIVER")
+print("=" * 60)
+
+print()
+print(f"Months: {len(corp_fails_monthly):,}")
+
+print(
+    f"Date range: "
+    f"{corp_fails_monthly['As Of Date'].min().date()} "
+    f"to {corp_fails_monthly['As Of Date'].max().date()}"
+)
+
+print()
+print("Weeks per month:")
+print(
+    corp_fails_monthly["WEEKS_IN_MONTH"]
+    .value_counts()
+    .sort_index()
+)
+
+print()
+print("Missing monthly means:")
+print(
+    corp_fails_monthly[
+        "MONTHLY_MEAN_FAILS_TO_DELIVER_MILLIONS"
+    ].isna().sum()
+)
+
+print()
+print("Summary:")
+print(
+    corp_fails_monthly[
+        "MONTHLY_MEAN_FAILS_TO_DELIVER_MILLIONS"
+    ].describe()
+)
+
+print()
+print("First five:")
+print(corp_fails_monthly.head().to_string(index=False))
+
+print()
+print("Last five:")
+print(corp_fails_monthly.tail().to_string(index=False))
+
+# Exclude incomplete current month
+corp_fails_monthly_complete = (
+    corp_fails_monthly[
+        corp_fails_monthly["WEEKS_IN_MONTH"] >= 4
+    ]
+    .copy()
+)
+
+output_path = (
+    RAW_DIR / "nyfed_corporate_fails_monthly.csv"
+)
+
+corp_fails_monthly_complete.to_csv(
+    output_path,
+    index=False,
+)
+
+print()
+print(f"Saved: {output_path}")
+print(
+    f"Complete months saved: "
+    f"{len(corp_fails_monthly_complete):,}"
+)
