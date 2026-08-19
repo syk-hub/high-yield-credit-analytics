@@ -29,6 +29,15 @@ fails_monthly = pd.read_csv(
     parse_dates=["As Of Date"],
 )
 
+HY_DEALER_MONTHLY_PATH = (
+    RAW_DIR / "nyfed_hy_dealer_positions_monthly.csv"
+)
+
+hy_dealer_monthly = pd.read_csv(
+    HY_DEALER_MONTHLY_PATH,
+    parse_dates=["As Of Date"],
+)
+
 # ------------------------------------------------------------
 # Load research dataset
 # ------------------------------------------------------------
@@ -743,4 +752,232 @@ print()
 print("Incremental R-squared from adding Delta Fails:")
 print(
     f"{model_intermediary.rsquared - model_vix_common.rsquared:.6f}"
+)
+
+# ------------------------------------------------------------
+# HY dealer net positions - monthly level diagnostics
+# ------------------------------------------------------------
+
+hy_position_series = (
+    hy_dealer_monthly[
+        "HY_DEALER_NET_POSITION_MILLIONS"
+    ]
+    .dropna()
+)
+
+print()
+print("=" * 60)
+print("HY DEALER NET POSITIONS - MONTHLY LEVEL DIAGNOSTICS")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(hy_position_series):,}")
+
+print()
+print("Summary:")
+print(hy_position_series.describe())
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"lag {lag}: "
+        f"{hy_position_series.autocorr(lag=lag):.4f}"
+    )
+
+adf_hy = adfuller(
+    hy_position_series,
+    autolag="AIC",
+)
+
+print()
+print(f"ADF statistic: {adf_hy[0]:.4f}")
+print(f"ADF p-value: {adf_hy[1]:.6f}")
+
+# ------------------------------------------------------------
+# HY dealer net positions - monthly change diagnostics
+# ------------------------------------------------------------
+
+hy_dealer_monthly["D_HY_DEALER_POSITION"] = (
+    hy_dealer_monthly[
+        "HY_DEALER_NET_POSITION_MILLIONS"
+    ]
+    .diff()
+)
+
+d_hy_position = (
+    hy_dealer_monthly["D_HY_DEALER_POSITION"]
+    .dropna()
+)
+
+print()
+print("=" * 60)
+print("HY DEALER NET POSITIONS - MONTHLY CHANGE DIAGNOSTICS")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(d_hy_position):,}")
+
+print()
+print("Summary:")
+print(d_hy_position.describe())
+
+print()
+print("Autocorrelation:")
+for lag in [1, 3, 6, 12]:
+    print(
+        f"lag {lag}: "
+        f"{d_hy_position.autocorr(lag=lag):.4f}"
+    )
+
+adf_d_hy = adfuller(
+    d_hy_position,
+    autolag="AIC",
+)
+
+print()
+print(f"ADF statistic: {adf_d_hy[0]:.4f}")
+print(f"ADF p-value: {adf_d_hy[1]:.6f}")
+
+# ------------------------------------------------------------
+# Merge HY dealer positions with EBP / VIX data
+# ------------------------------------------------------------
+
+hy_for_merge = hy_dealer_monthly[
+    [
+        "As Of Date",
+        "D_HY_DEALER_POSITION",
+    ]
+].copy()
+
+hy_for_merge = hy_for_merge.rename(
+    columns={"As Of Date": "date"}
+)
+
+hy_for_merge["date"] = (
+    pd.to_datetime(hy_for_merge["date"])
+    .dt.to_period("M")
+    .dt.to_timestamp("M")
+)
+
+hy_intermediary_data = change_data.merge(
+    hy_for_merge,
+    on="date",
+    how="inner",
+    validate="one_to_one",
+)
+
+hy_intermediary_data = hy_intermediary_data.dropna(
+    subset=[
+        "delta_ebp",
+        "delta_vix",
+        "D_HY_DEALER_POSITION",
+    ]
+)
+
+print()
+print("=" * 60)
+print("EBP / VIX / HY DEALER POSITIONS - MERGE CHECK")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(hy_intermediary_data):,}")
+
+print(
+    f"Date range: "
+    f"{hy_intermediary_data['date'].min().date()} "
+    f"to {hy_intermediary_data['date'].max().date()}"
+)
+
+print()
+print("Correlation matrix:")
+print(
+    hy_intermediary_data[
+        [
+            "delta_ebp",
+            "delta_vix",
+            "D_HY_DEALER_POSITION",
+        ]
+    ].corr()
+)
+
+# ------------------------------------------------------------
+# HY dealer positions - common-sample HAC comparison
+# ------------------------------------------------------------
+
+y_hy = hy_intermediary_data["delta_ebp"]
+
+# VIX-only benchmark
+X_hy_vix = sm.add_constant(
+    hy_intermediary_data[["delta_vix"]]
+)
+
+model_hy_vix = sm.OLS(
+    y_hy,
+    X_hy_vix,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+# VIX + HY dealer position
+X_hy_full = sm.add_constant(
+    hy_intermediary_data[
+        [
+            "delta_vix",
+            "D_HY_DEALER_POSITION",
+        ]
+    ]
+)
+
+model_hy_full = sm.OLS(
+    y_hy,
+    X_hy_full,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 3},
+)
+
+print()
+print("=" * 60)
+print("HY DEALER POSITIONS - COMMON-SAMPLE HAC COMPARISON")
+print("=" * 60)
+
+print()
+print("VIX ONLY")
+print(f"N: {int(model_hy_vix.nobs)}")
+print(
+    f"Delta VIX coefficient: "
+    f"{model_hy_vix.params['delta_vix']:.6f}"
+)
+print(
+    f"Delta VIX p-value: "
+    f"{model_hy_vix.pvalues['delta_vix']:.6f}"
+)
+print(f"R-squared: {model_hy_vix.rsquared:.6f}")
+
+print()
+print("VIX + HY DEALER POSITION")
+print(
+    f"Delta VIX coefficient: "
+    f"{model_hy_full.params['delta_vix']:.6f}"
+)
+print(
+    f"Delta VIX p-value: "
+    f"{model_hy_full.pvalues['delta_vix']:.6f}"
+)
+print(
+    f"Delta HY position coefficient: "
+    f"{model_hy_full.params['D_HY_DEALER_POSITION']:.8f}"
+)
+print(
+    f"Delta HY position p-value: "
+    f"{model_hy_full.pvalues['D_HY_DEALER_POSITION']:.6f}"
+)
+print(f"R-squared: {model_hy_full.rsquared:.6f}")
+
+print()
+print(
+    "Incremental R-squared from HY dealer position: "
+    f"{model_hy_full.rsquared - model_hy_vix.rsquared:.6f}"
 )

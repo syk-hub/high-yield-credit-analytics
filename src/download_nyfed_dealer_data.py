@@ -1525,3 +1525,168 @@ print(
     f"Complete months saved: "
     f"{len(corp_fails_monthly_complete):,}"
 )
+
+# ------------------------------------------------------------
+# HY dealer net positions — standardized weekly history
+# ------------------------------------------------------------
+
+hy_old["REPORTING_REGIME"] = "2013-04_to_2014-12"
+hy_2015_total["REPORTING_REGIME"] = "2015-01_to_2021-12"
+hy_2022_total["REPORTING_REGIME"] = "2022-01_to_2024-06"
+hy_2024_total["REPORTING_REGIME"] = "2024-07_onward"
+
+hy_dealer_weekly = pd.concat(
+    [
+        hy_old,
+        hy_2015_total,
+        hy_2022_total,
+        hy_2024_total,
+    ],
+    ignore_index=True,
+)
+
+hy_dealer_weekly = (
+    hy_dealer_weekly
+    .sort_values("As Of Date")
+    .reset_index(drop=True)
+)
+
+print()
+print("=" * 60)
+print("HY DEALER NET POSITIONS - STANDARDIZED WEEKLY SERIES")
+print("=" * 60)
+
+print()
+print(f"Rows: {len(hy_dealer_weekly):,}")
+
+print(
+    f"Date range: "
+    f"{hy_dealer_weekly['As Of Date'].min().date()} "
+    f"to {hy_dealer_weekly['As Of Date'].max().date()}"
+)
+
+print()
+print("Missing values:")
+print(
+    hy_dealer_weekly[
+        "HY_DEALER_NET_POSITION_MILLIONS"
+    ].isna().sum()
+)
+
+print()
+print("Duplicate dates:")
+print(
+    hy_dealer_weekly["As Of Date"]
+    .duplicated()
+    .sum()
+)
+
+print()
+print("Observations by reporting regime:")
+print(
+    hy_dealer_weekly["REPORTING_REGIME"]
+    .value_counts(sort=False)
+)
+
+print()
+print("First five:")
+print(hy_dealer_weekly.head().to_string(index=False))
+
+print()
+print("Last five:")
+print(hy_dealer_weekly.tail().to_string(index=False))
+
+# ------------------------------------------------------------
+# HY dealer net positions — monthly construction
+# Stock measure: last weekly observation in each month
+# ------------------------------------------------------------
+
+hy_dealer_monthly = (
+    hy_dealer_weekly
+    .set_index("As Of Date")
+    ["HY_DEALER_NET_POSITION_MILLIONS"]
+    .resample("ME")
+    .agg(
+        HY_DEALER_NET_POSITION_MILLIONS="last",
+        WEEKS_IN_MONTH="count",
+    )
+    .reset_index()
+)
+
+print()
+print("=" * 60)
+print("HY DEALER NET POSITIONS - MONTHLY")
+print("=" * 60)
+
+print()
+print(f"Months: {len(hy_dealer_monthly):,}")
+
+print(
+    f"Date range: "
+    f"{hy_dealer_monthly['As Of Date'].min().date()} "
+    f"to {hy_dealer_monthly['As Of Date'].max().date()}"
+)
+
+print()
+print("Weeks per month:")
+print(
+    hy_dealer_monthly["WEEKS_IN_MONTH"]
+    .value_counts()
+    .sort_index()
+)
+
+print()
+print("Missing monthly positions:")
+print(
+    hy_dealer_monthly[
+        "HY_DEALER_NET_POSITION_MILLIONS"
+    ].isna().sum()
+)
+
+print()
+print("Summary:")
+print(
+    hy_dealer_monthly[
+        "HY_DEALER_NET_POSITION_MILLIONS"
+    ].describe()
+)
+
+print()
+print("First five:")
+print(
+    hy_dealer_monthly
+    .head()
+    .to_string(index=False)
+)
+
+print()
+print("Last five:")
+print(
+    hy_dealer_monthly
+    .tail()
+    .to_string(index=False)
+)
+
+# Exclude incomplete current month
+hy_dealer_monthly_complete = (
+    hy_dealer_monthly[
+        hy_dealer_monthly["WEEKS_IN_MONTH"] >= 4
+    ]
+    .copy()
+)
+
+output_path = (
+    RAW_DIR / "nyfed_hy_dealer_positions_monthly.csv"
+)
+
+hy_dealer_monthly_complete.to_csv(
+    output_path,
+    index=False,
+)
+
+print()
+print(f"Saved: {output_path}")
+print(
+    f"Complete months saved: "
+    f"{len(hy_dealer_monthly_complete):,}"
+)
