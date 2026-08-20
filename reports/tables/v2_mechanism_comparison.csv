@@ -1,0 +1,8 @@
+MODEL,FREQUENCY,N,FOCAL_VARIABLE,FOCAL_COEFFICIENT,FOCAL_P_VALUE,R_SQUARED,INCREMENTAL_R_SQUARED,INTERPRETATION
+Monthly: Delta EBP ~ Delta VIX,Monthly,438,Delta VIX,0.02764402696541413,3.3524131507293193e-10,0.23526730712995148,,Strong contemporaneous association; not evidence of forecasting.
+Monthly: Delta EBP ~ Delta VIX + Delta 10Y,Monthly,438,Delta 10Y Treasury,-0.06953268689423474,0.13863271027500723,0.23940903455388463,0.00414172742393315,Little incremental explanatory power beyond Delta VIX.
+Monthly: Delta EBP ~ Delta VIX + Delta Fails,Monthly,300,Delta Corporate Fails to Deliver,-4.515981190977567e-06,0.12096973581994903,0.292538805085065,0.00803398374089026,Weak incremental settlement/intermediation signal.
+Monthly: Delta EBP ~ Delta VIX + Delta HY Dealer Position,Monthly,159,Delta HY Dealer Net Position,-3.416979850670569e-06,0.6801414475789829,0.24699453420159478,0.0006119938892398258,Dealer inventory adds essentially no information beyond Delta VIX.
+Quarterly: Delta EBP(t+1) ~ VIX(t) + BD Wealth Share(t),Quarterly,144,BD Wealth Share,1.032154011838733,0.014671314321223957,0.16993631064914438,0.040283317648307726,Suggestive predictive level result; highly persistent predictor.
+Quarterly robustness: Delta EBP(t+1) ~ VIX(t) + Delta BD Wealth Share(t),Quarterly,143,Delta BD Wealth Share,-0.9675844815140084,0.630129537933255,0.13178149792113303,,Stationary robustness test does not confirm the level result.
+Monthly predictive: Delta EBP(t+1) ~ Delta VIX(t),Monthly,437,Lagged Delta VIX,0.004170482333643201,0.22978567105717285,0.0053581797835470235,,Little next-month predictive power.

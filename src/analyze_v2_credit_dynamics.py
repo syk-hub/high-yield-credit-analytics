@@ -2,6 +2,8 @@ from pathlib import Path
 import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
+import numpy as np
+import matplotlib.pyplot as plt
 
 # ------------------------------------------------------------
 # Paths
@@ -36,6 +38,11 @@ HY_DEALER_MONTHLY_PATH = (
 hy_dealer_monthly = pd.read_csv(
     HY_DEALER_MONTHLY_PATH,
     parse_dates=["As Of Date"],
+)
+
+KARGAR_INTERMEDIARY_PATH = (
+    RAW_DIR
+    / "fred_kargar_intermediary_wealth_share_quarterly.csv"
 )
 
 # ------------------------------------------------------------
@@ -981,3 +988,1121 @@ print(
     "Incremental R-squared from HY dealer position: "
     f"{model_hy_full.rsquared - model_hy_vix.rsquared:.6f}"
 )
+
+# ------------------------------------------------------------
+# Kargar-style intermediary wealth share - load
+# ------------------------------------------------------------
+
+kargar_data = pd.read_csv(
+    KARGAR_INTERMEDIARY_PATH,
+    parse_dates=["date"],
+)
+
+print()
+print("=" * 60)
+print("KARGAR INTERMEDIARY WEALTH SHARE - ANALYSIS LOAD CHECK")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(kargar_data):,}")
+
+print(
+    f"Date range: "
+    f"{kargar_data['date'].min().date()} "
+    f"to {kargar_data['date'].max().date()}"
+)
+
+print()
+print("Missing values:")
+print(
+    kargar_data[
+        [
+            "BD_EQUITY",
+            "BANK_EQUITY",
+            "BD_WEALTH_SHARE",
+        ]
+    ].isna().sum()
+)
+
+print()
+print("Last five:")
+print(
+    kargar_data[
+        [
+            "date",
+            "BD_EQUITY",
+            "BANK_EQUITY",
+            "BD_WEALTH_SHARE",
+        ]
+    ]
+    .tail()
+    .to_string(index=False)
+)
+
+# ------------------------------------------------------------
+# Quarterly EBP / VIX construction for Kargar-style test
+# ------------------------------------------------------------
+
+quarterly_market = (
+    market_data[
+        [
+            "date",
+            "ebp",
+            "VIX",
+        ]
+    ]
+    .copy()
+)
+
+quarterly_market["quarter"] = (
+    quarterly_market["date"]
+    .dt.to_period("Q")
+)
+
+quarterly_market = (
+    quarterly_market
+    .groupby(
+        "quarter",
+        as_index=False,
+    )
+    .agg(
+        EBP_QUARTER_END=("ebp", "last"),
+        VIX_QUARTER_MEAN=("VIX", "mean"),
+        MONTHS_IN_QUARTER=("date", "count"),
+    )
+)
+
+quarterly_market["date"] = (
+    quarterly_market["quarter"]
+    .dt.to_timestamp(how="end")
+    .dt.normalize()
+)
+
+quarterly_market["D_EBP_QUARTERLY"] = (
+    quarterly_market["EBP_QUARTER_END"]
+    .diff()
+)
+
+quarterly_market["D_VIX_QUARTERLY"] = (
+    quarterly_market["VIX_QUARTER_MEAN"]
+    .diff()
+)
+
+print()
+print("=" * 60)
+print("QUARTERLY EBP / VIX - CONSTRUCTION CHECK")
+print("=" * 60)
+
+print()
+print(f"Quarters: {len(quarterly_market):,}")
+
+print(
+    f"Date range: "
+    f"{quarterly_market['date'].min().date()} "
+    f"to {quarterly_market['date'].max().date()}"
+)
+
+print()
+print("Months per quarter:")
+print(
+    quarterly_market["MONTHS_IN_QUARTER"]
+    .value_counts()
+    .sort_index()
+)
+
+print()
+print("Last five:")
+print(
+    quarterly_market[
+        [
+            "date",
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "D_EBP_QUARTERLY",
+            "D_VIX_QUARTERLY",
+            "MONTHS_IN_QUARTER",
+        ]
+    ]
+    .tail()
+    .to_string(index=False)
+)
+
+quarterly_market_complete = (
+    quarterly_market[
+        quarterly_market["MONTHS_IN_QUARTER"] == 3
+    ]
+    .copy()
+)
+
+print()
+print("=" * 60)
+print("QUARTERLY MARKET DATA - COMPLETE QUARTERS")
+print("=" * 60)
+
+print()
+print(f"Complete quarters: {len(quarterly_market_complete):,}")
+
+print(
+    f"Date range: "
+    f"{quarterly_market_complete['date'].min().date()} "
+    f"to {quarterly_market_complete['date'].max().date()}"
+)
+
+print()
+print("Last five:")
+print(
+    quarterly_market_complete[
+        [
+            "date",
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "D_EBP_QUARTERLY",
+            "D_VIX_QUARTERLY",
+        ]
+    ]
+    .tail()
+    .to_string(index=False)
+)
+
+# ------------------------------------------------------------
+# Align Kargar wealth share with quarterly EBP / VIX
+# ------------------------------------------------------------
+
+kargar_for_merge = kargar_data[
+    [
+        "date",
+        "BD_WEALTH_SHARE",
+    ]
+].copy()
+
+# FRED Financial Accounts dates are quarter-start labels.
+# Convert both datasets to a common quarterly Period key.
+kargar_for_merge["quarter"] = (
+    kargar_for_merge["date"]
+    .dt.to_period("Q")
+)
+
+market_for_merge = (
+    quarterly_market_complete[
+        [
+            "date",
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "D_EBP_QUARTERLY",
+            "D_VIX_QUARTERLY",
+        ]
+    ]
+    .copy()
+)
+
+market_for_merge["quarter"] = (
+    market_for_merge["date"]
+    .dt.to_period("Q")
+)
+
+kargar_ebp = market_for_merge.merge(
+    kargar_for_merge[
+        [
+            "quarter",
+            "BD_WEALTH_SHARE",
+        ]
+    ],
+    on="quarter",
+    how="inner",
+    validate="one_to_one",
+)
+
+print()
+print("=" * 60)
+print("KARGAR WEALTH SHARE / EBP - QUARTERLY MERGE CHECK")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(kargar_ebp):,}")
+
+print(
+    f"Quarter range: "
+    f"{kargar_ebp['quarter'].min()} "
+    f"to {kargar_ebp['quarter'].max()}"
+)
+
+print()
+print("Missing values:")
+print(
+    kargar_ebp[
+        [
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "D_EBP_QUARTERLY",
+            "D_VIX_QUARTERLY",
+            "BD_WEALTH_SHARE",
+        ]
+    ].isna().sum()
+)
+
+print()
+print("Last five:")
+print(
+    kargar_ebp[
+        [
+            "quarter",
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "BD_WEALTH_SHARE",
+        ]
+    ]
+    .tail()
+    .to_string(index=False)
+)
+
+# ------------------------------------------------------------
+# Kargar wealth share / EBP - level diagnostics
+# ------------------------------------------------------------
+
+kargar_level = kargar_ebp[
+    [
+        "quarter",
+        "EBP_QUARTER_END",
+        "VIX_QUARTER_MEAN",
+        "BD_WEALTH_SHARE",
+    ]
+].dropna().copy()
+
+print()
+print("=" * 60)
+print("KARGAR WEALTH SHARE / EBP - LEVEL DIAGNOSTICS")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(kargar_level):,}")
+
+print()
+print("Correlation matrix:")
+print(
+    kargar_level[
+        [
+            "EBP_QUARTER_END",
+            "VIX_QUARTER_MEAN",
+            "BD_WEALTH_SHARE",
+        ]
+    ].corr()
+)
+
+print()
+print("EBP autocorrelation:")
+for lag in [1, 2, 4]:
+    print(
+        f"lag {lag}: "
+        f"{kargar_level['EBP_QUARTER_END'].autocorr(lag=lag):.4f}"
+    )
+
+print()
+print("BD wealth-share autocorrelation:")
+for lag in [1, 2, 4]:
+    print(
+        f"lag {lag}: "
+        f"{kargar_level['BD_WEALTH_SHARE'].autocorr(lag=lag):.4f}"
+    )
+
+adf_ebp_q = adfuller(
+    kargar_level["EBP_QUARTER_END"],
+    autolag="AIC",
+)
+
+adf_bd_share = adfuller(
+    kargar_level["BD_WEALTH_SHARE"],
+    autolag="AIC",
+)
+
+print()
+print("ADF tests:")
+print(
+    f"Quarter-end EBP: "
+    f"stat={adf_ebp_q[0]:.4f}, "
+    f"p={adf_ebp_q[1]:.6f}"
+)
+
+print(
+    f"BD wealth share: "
+    f"stat={adf_bd_share[0]:.4f}, "
+    f"p={adf_bd_share[1]:.6f}"
+)
+
+# ------------------------------------------------------------
+# Kargar-inspired predictive test
+# BD wealth share(t) -> Delta EBP(t+1)
+# ------------------------------------------------------------
+
+kargar_predictive = kargar_ebp[
+    [
+        "quarter",
+        "BD_WEALTH_SHARE",
+        "VIX_QUARTER_MEAN",
+        "D_EBP_QUARTERLY",
+    ]
+].copy()
+
+# Next quarter's change in EBP
+kargar_predictive["D_EBP_NEXT_Q"] = (
+    kargar_predictive["D_EBP_QUARTERLY"]
+    .shift(-1)
+)
+
+kargar_predictive = kargar_predictive.dropna(
+    subset=[
+        "BD_WEALTH_SHARE",
+        "VIX_QUARTER_MEAN",
+        "D_EBP_NEXT_Q",
+    ]
+)
+
+y_pred = kargar_predictive["D_EBP_NEXT_Q"]
+
+# Model 1: BD wealth share only
+X_bd = sm.add_constant(
+    kargar_predictive[
+        ["BD_WEALTH_SHARE"]
+    ]
+)
+
+model_bd_pred = sm.OLS(
+    y_pred,
+    X_bd,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 4},
+)
+
+# Model 2: VIX only
+X_vix_q = sm.add_constant(
+    kargar_predictive[
+        ["VIX_QUARTER_MEAN"]
+    ]
+)
+
+model_vix_pred = sm.OLS(
+    y_pred,
+    X_vix_q,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 4},
+)
+
+# Model 3: VIX + BD wealth share
+X_bd_vix = sm.add_constant(
+    kargar_predictive[
+        [
+            "VIX_QUARTER_MEAN",
+            "BD_WEALTH_SHARE",
+        ]
+    ]
+)
+
+model_bd_vix_pred = sm.OLS(
+    y_pred,
+    X_bd_vix,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 4},
+)
+
+print()
+print("=" * 60)
+print("KARGAR-INSPIRED PREDICTIVE TEST")
+print("BD WEALTH SHARE(t) -> DELTA EBP(t+1)")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(kargar_predictive):,}")
+
+print()
+print("BD WEALTH SHARE ONLY")
+print(
+    f"BD share coefficient: "
+    f"{model_bd_pred.params['BD_WEALTH_SHARE']:.6f}"
+)
+print(
+    f"BD share p-value: "
+    f"{model_bd_pred.pvalues['BD_WEALTH_SHARE']:.6f}"
+)
+print(
+    f"R-squared: "
+    f"{model_bd_pred.rsquared:.6f}"
+)
+
+print()
+print("VIX ONLY")
+print(
+    f"VIX coefficient: "
+    f"{model_vix_pred.params['VIX_QUARTER_MEAN']:.6f}"
+)
+print(
+    f"VIX p-value: "
+    f"{model_vix_pred.pvalues['VIX_QUARTER_MEAN']:.6f}"
+)
+print(
+    f"R-squared: "
+    f"{model_vix_pred.rsquared:.6f}"
+)
+
+print()
+print("VIX + BD WEALTH SHARE")
+print(
+    f"VIX coefficient: "
+    f"{model_bd_vix_pred.params['VIX_QUARTER_MEAN']:.6f}"
+)
+print(
+    f"VIX p-value: "
+    f"{model_bd_vix_pred.pvalues['VIX_QUARTER_MEAN']:.6f}"
+)
+print(
+    f"BD share coefficient: "
+    f"{model_bd_vix_pred.params['BD_WEALTH_SHARE']:.6f}"
+)
+print(
+    f"BD share p-value: "
+    f"{model_bd_vix_pred.pvalues['BD_WEALTH_SHARE']:.6f}"
+)
+print(
+    f"R-squared: "
+    f"{model_bd_vix_pred.rsquared:.6f}"
+)
+
+print()
+print(
+    "Incremental R-squared from BD wealth share: "
+    f"{model_bd_vix_pred.rsquared - model_vix_pred.rsquared:.6f}"
+)
+# ------------------------------------------------------------
+# Kargar robustness test:
+# Delta BD wealth share(t) -> Delta EBP(t+1)
+# ------------------------------------------------------------
+
+kargar_robust = kargar_ebp[
+    [
+        "quarter",
+        "BD_WEALTH_SHARE",
+        "VIX_QUARTER_MEAN",
+        "D_EBP_QUARTERLY",
+    ]
+].copy()
+
+kargar_robust["D_BD_WEALTH_SHARE"] = (
+    kargar_robust["BD_WEALTH_SHARE"].diff()
+)
+
+kargar_robust["D_EBP_NEXT_Q"] = (
+    kargar_robust["D_EBP_QUARTERLY"].shift(-1)
+)
+
+kargar_robust = kargar_robust.dropna(
+    subset=[
+        "D_BD_WEALTH_SHARE",
+        "VIX_QUARTER_MEAN",
+        "D_EBP_NEXT_Q",
+    ]
+)
+
+# Stationarity check
+adf_d_bd = adfuller(
+    kargar_robust["D_BD_WEALTH_SHARE"],
+    autolag="AIC",
+)
+
+print()
+print("=" * 60)
+print("DELTA BD WEALTH SHARE - ROBUSTNESS TEST")
+print("=" * 60)
+
+print()
+print(f"Observations: {len(kargar_robust):,}")
+
+print()
+print(
+    f"ADF statistic: {adf_d_bd[0]:.4f}"
+)
+print(
+    f"ADF p-value: {adf_d_bd[1]:.6f}"
+)
+
+# Predictive regression
+y_robust = kargar_robust["D_EBP_NEXT_Q"]
+
+X_robust = sm.add_constant(
+    kargar_robust[
+        [
+            "VIX_QUARTER_MEAN",
+            "D_BD_WEALTH_SHARE",
+        ]
+    ]
+)
+
+model_robust = sm.OLS(
+    y_robust,
+    X_robust,
+).fit(
+    cov_type="HAC",
+    cov_kwds={"maxlags": 4},
+)
+
+print()
+print("VIX + DELTA BD WEALTH SHARE")
+
+print(
+    f"VIX coefficient: "
+    f"{model_robust.params['VIX_QUARTER_MEAN']:.6f}"
+)
+
+print(
+    f"VIX p-value: "
+    f"{model_robust.pvalues['VIX_QUARTER_MEAN']:.6f}"
+)
+
+print(
+    f"Delta BD share coefficient: "
+    f"{model_robust.params['D_BD_WEALTH_SHARE']:.6f}"
+)
+
+print(
+    f"Delta BD share p-value: "
+    f"{model_robust.pvalues['D_BD_WEALTH_SHARE']:.6f}"
+)
+
+print(
+    f"R-squared: "
+    f"{model_robust.rsquared:.6f}"
+)
+
+# ------------------------------------------------------------
+# V2 mechanism summary
+# ------------------------------------------------------------
+
+print()
+print("=" * 60)
+print("V2 CREDIT DYNAMICS - MECHANISM SUMMARY")
+print("=" * 60)
+
+print()
+print("MONTHLY CONTEMPORANEOUS RESULTS")
+
+print(
+    "VIX-only full-sample R-squared: "
+    f"{change_model.rsquared:.6f}"
+)
+
+print(
+    "VIX + 10Y full-sample R-squared: "
+    f"{vix_treasury_model.rsquared:.6f}"
+)
+
+print(
+    "Incremental R-squared from 10Y: "
+    f"{vix_treasury_model.rsquared - change_model.rsquared:.6f}"
+)
+
+print()
+print("COMMON-SAMPLE INTERMEDIARY RESULTS")
+
+print(
+    "Fails incremental R-squared: "
+    f"{model_intermediary.rsquared - model_vix_common.rsquared:.6f}"
+)
+
+print(
+    "HY dealer position incremental R-squared: "
+    f"{model_hy_full.rsquared - model_hy_vix.rsquared:.6f}"
+)
+
+print()
+print("QUARTERLY KARGAR-INSPIRED RESULT")
+
+print(
+    "BD wealth-share level incremental R-squared: "
+    f"{model_bd_vix_pred.rsquared - model_vix_pred.rsquared:.6f}"
+)
+
+print(
+    "BD wealth-share level p-value: "
+    f"{model_bd_vix_pred.pvalues['BD_WEALTH_SHARE']:.6f}"
+)
+
+print(
+    "Delta BD wealth-share robustness p-value: "
+    f"{model_robust.pvalues['D_BD_WEALTH_SHARE']:.6f}"
+)
+
+print()
+print("PREDICTIVE VIX RESULT")
+
+print(
+    "Monthly Delta VIX(t) -> Delta EBP(t+1) R-squared: "
+    f"{lead_change_model.rsquared:.6f}"
+)
+
+# ------------------------------------------------------------
+# V2 mechanism comparison table
+# ------------------------------------------------------------
+
+mechanism_summary = pd.DataFrame(
+    [
+        {
+            "MODEL": "Monthly: Delta EBP ~ Delta VIX",
+            "FREQUENCY": "Monthly",
+            "N": int(change_model.nobs),
+            "FOCAL_VARIABLE": "Delta VIX",
+            "FOCAL_COEFFICIENT": change_model.params["delta_vix"],
+            "FOCAL_P_VALUE": change_model.pvalues["delta_vix"],
+            "R_SQUARED": change_model.rsquared,
+            "INCREMENTAL_R_SQUARED": pd.NA,
+            "INTERPRETATION": (
+                "Strong contemporaneous association; "
+                "not evidence of forecasting."
+            ),
+        },
+        {
+            "MODEL": "Monthly: Delta EBP ~ Delta VIX + Delta 10Y",
+            "FREQUENCY": "Monthly",
+            "N": int(vix_treasury_model.nobs),
+            "FOCAL_VARIABLE": "Delta 10Y Treasury",
+            "FOCAL_COEFFICIENT": (
+                vix_treasury_model.params["delta_treasury_10y"]
+            ),
+            "FOCAL_P_VALUE": (
+                vix_treasury_model.pvalues["delta_treasury_10y"]
+            ),
+            "R_SQUARED": vix_treasury_model.rsquared,
+            "INCREMENTAL_R_SQUARED": (
+                vix_treasury_model.rsquared
+                - change_model.rsquared
+            ),
+            "INTERPRETATION": (
+                "Little incremental explanatory power beyond Delta VIX."
+            ),
+        },
+        {
+            "MODEL": "Monthly: Delta EBP ~ Delta VIX + Delta Fails",
+            "FREQUENCY": "Monthly",
+            "N": int(model_intermediary.nobs),
+            "FOCAL_VARIABLE": "Delta Corporate Fails to Deliver",
+            "FOCAL_COEFFICIENT": (
+                model_intermediary.params["D_FAILS_DELIVER"]
+            ),
+            "FOCAL_P_VALUE": (
+                model_intermediary.pvalues["D_FAILS_DELIVER"]
+            ),
+            "R_SQUARED": model_intermediary.rsquared,
+            "INCREMENTAL_R_SQUARED": (
+                model_intermediary.rsquared
+                - model_vix_common.rsquared
+            ),
+            "INTERPRETATION": (
+                "Weak incremental settlement/intermediation signal."
+            ),
+        },
+        {
+            "MODEL": (
+                "Monthly: Delta EBP ~ Delta VIX "
+                "+ Delta HY Dealer Position"
+            ),
+            "FREQUENCY": "Monthly",
+            "N": int(model_hy_full.nobs),
+            "FOCAL_VARIABLE": "Delta HY Dealer Net Position",
+            "FOCAL_COEFFICIENT": (
+                model_hy_full.params["D_HY_DEALER_POSITION"]
+            ),
+            "FOCAL_P_VALUE": (
+                model_hy_full.pvalues["D_HY_DEALER_POSITION"]
+            ),
+            "R_SQUARED": model_hy_full.rsquared,
+            "INCREMENTAL_R_SQUARED": (
+                model_hy_full.rsquared
+                - model_hy_vix.rsquared
+            ),
+            "INTERPRETATION": (
+                "Dealer inventory adds essentially no information "
+                "beyond Delta VIX."
+            ),
+        },
+        {
+            "MODEL": (
+                "Quarterly: Delta EBP(t+1) ~ VIX(t) "
+                "+ BD Wealth Share(t)"
+            ),
+            "FREQUENCY": "Quarterly",
+            "N": int(model_bd_vix_pred.nobs),
+            "FOCAL_VARIABLE": "BD Wealth Share",
+            "FOCAL_COEFFICIENT": (
+                model_bd_vix_pred.params["BD_WEALTH_SHARE"]
+            ),
+            "FOCAL_P_VALUE": (
+                model_bd_vix_pred.pvalues["BD_WEALTH_SHARE"]
+            ),
+            "R_SQUARED": model_bd_vix_pred.rsquared,
+            "INCREMENTAL_R_SQUARED": (
+                model_bd_vix_pred.rsquared
+                - model_vix_pred.rsquared
+            ),
+            "INTERPRETATION": (
+                "Suggestive predictive level result; "
+                "highly persistent predictor."
+            ),
+        },
+        {
+            "MODEL": (
+                "Quarterly robustness: Delta EBP(t+1) ~ VIX(t) "
+                "+ Delta BD Wealth Share(t)"
+            ),
+            "FREQUENCY": "Quarterly",
+            "N": int(model_robust.nobs),
+            "FOCAL_VARIABLE": "Delta BD Wealth Share",
+            "FOCAL_COEFFICIENT": (
+                model_robust.params["D_BD_WEALTH_SHARE"]
+            ),
+            "FOCAL_P_VALUE": (
+                model_robust.pvalues["D_BD_WEALTH_SHARE"]
+            ),
+            "R_SQUARED": model_robust.rsquared,
+            "INCREMENTAL_R_SQUARED": pd.NA,
+            "INTERPRETATION": (
+                "Stationary robustness test does not confirm "
+                "the level result."
+            ),
+        },
+        {
+            "MODEL": "Monthly predictive: Delta EBP(t+1) ~ Delta VIX(t)",
+            "FREQUENCY": "Monthly",
+            "N": int(lead_change_model.nobs),
+            "FOCAL_VARIABLE": "Lagged Delta VIX",
+            "FOCAL_COEFFICIENT": (
+                lead_change_model.params["delta_vix"]
+            ),
+            "FOCAL_P_VALUE": (
+                lead_change_model.pvalues["delta_vix"]
+            ),
+            "R_SQUARED": lead_change_model.rsquared,
+            "INCREMENTAL_R_SQUARED": pd.NA,
+            "INTERPRETATION": (
+                "Little next-month predictive power."
+            ),
+        },
+    ]
+)
+
+print()
+print("=" * 60)
+print("V2 MECHANISM COMPARISON TABLE")
+print("=" * 60)
+
+print()
+print(
+    mechanism_summary[
+        [
+            "MODEL",
+            "N",
+            "FOCAL_VARIABLE",
+            "FOCAL_COEFFICIENT",
+            "FOCAL_P_VALUE",
+            "R_SQUARED",
+            "INCREMENTAL_R_SQUARED",
+        ]
+    ].to_string(index=False)
+)
+
+MECHANISM_SUMMARY_PATH = (
+    PROJECT_ROOT
+    / "reports"
+    / "tables"
+    / "v2_mechanism_comparison.csv"
+)
+
+MECHANISM_SUMMARY_PATH.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+mechanism_summary.to_csv(
+    MECHANISM_SUMMARY_PATH,
+    index=False,
+)
+
+print()
+print(f"Saved: {MECHANISM_SUMMARY_PATH}")
+
+# ------------------------------------------------------------
+# Figure 1: Monthly Delta EBP vs Delta VIX
+# ------------------------------------------------------------
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(
+    figsize=(9, 6)
+)
+
+ax.scatter(
+    change_data["delta_vix"],
+    change_data["delta_ebp"],
+    alpha=0.55,
+    s=24,
+)
+
+# Regression line
+x_line = np.linspace(
+    change_data["delta_vix"].min(),
+    change_data["delta_vix"].max(),
+    100,
+)
+
+y_line = (
+    change_model.params["const"]
+    + change_model.params["delta_vix"] * x_line
+)
+
+ax.plot(
+    x_line,
+    y_line,
+    linewidth=2,
+)
+
+ax.axhline(
+    0,
+    linewidth=0.8,
+    alpha=0.5,
+)
+
+ax.axvline(
+    0,
+    linewidth=0.8,
+    alpha=0.5,
+)
+
+ax.set_title(
+    "Credit Risk Repricing and Changes in Market Uncertainty"
+)
+
+ax.set_xlabel(
+    "Monthly Change in VIX"
+)
+
+ax.set_ylabel(
+    "Monthly Change in Excess Bond Premium"
+)
+
+ax.text(
+    0.03,
+    0.95,
+    (
+        f"HAC coefficient = "
+        f"{change_model.params['delta_vix']:.3f}\n"
+        f"p < 0.001\n"
+        f"R² = {change_model.rsquared:.3f}\n"
+        f"N = {int(change_model.nobs)}"
+    ),
+    transform=ax.transAxes,
+    verticalalignment="top",
+)
+
+fig.tight_layout()
+
+FIGURE_DIR = (
+    PROJECT_ROOT
+    / "reports"
+    / "figures"
+)
+
+FIGURE_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+figure_1_path = (
+    FIGURE_DIR
+    / "v2_delta_ebp_vs_delta_vix.png"
+)
+
+fig.savefig(
+    figure_1_path,
+    dpi=300,
+    bbox_inches="tight",
+)
+
+plt.close(fig)
+
+print()
+print(f"Saved Figure 1: {figure_1_path}")
+
+# ------------------------------------------------------------
+# Figure 2: Incremental explanatory power
+# ------------------------------------------------------------
+
+mechanism_plot = pd.DataFrame(
+    {
+        "Mechanism": [
+            "10Y Treasury\nchange",
+            "Corporate\nfails",
+            "HY dealer\nposition",
+            "BD wealth\nshare*",
+        ],
+        "Incremental_R2": [
+            (
+                vix_treasury_model.rsquared
+                - change_model.rsquared
+            ),
+            (
+                model_intermediary.rsquared
+                - model_vix_common.rsquared
+            ),
+            (
+                model_hy_full.rsquared
+                - model_hy_vix.rsquared
+            ),
+            (
+                model_bd_vix_pred.rsquared
+                - model_vix_pred.rsquared
+            ),
+        ],
+    }
+)
+
+fig, ax = plt.subplots(
+    figsize=(9, 5.5)
+)
+
+bars = ax.bar(
+    mechanism_plot["Mechanism"],
+    mechanism_plot["Incremental_R2"],
+)
+
+ax.set_title(
+    "Incremental Explanatory Power Beyond the VIX Benchmark"
+)
+
+ax.set_ylabel(
+    "Incremental R²"
+)
+
+ax.set_ylim(
+    0,
+    mechanism_plot["Incremental_R2"].max() * 1.25,
+)
+
+for bar, value in zip(
+    bars,
+    mechanism_plot["Incremental_R2"],
+):
+    ax.text(
+        bar.get_x() + bar.get_width() / 2,
+        bar.get_height() + 0.001,
+        f"{value:.3f}",
+        ha="center",
+        va="bottom",
+    )
+
+ax.text(
+    0.99,
+    0.95,
+    (
+        "* Quarterly predictive BD wealth-share level.\n"
+        "  Significant in levels but not robust to\n"
+        "  stationary first-difference specification."
+    ),
+    transform=ax.transAxes,
+    ha="right",
+    va="top",
+    fontsize=9,
+)
+
+fig.tight_layout()
+
+figure_2_path = (
+    FIGURE_DIR
+    / "v2_incremental_mechanism_r2.png"
+)
+
+fig.savefig(
+    figure_2_path,
+    dpi=300,
+    bbox_inches="tight",
+)
+
+plt.close(fig)
+
+print()
+print(f"Saved Figure 2: {figure_2_path}")
+
+# ------------------------------------------------------------
+# Figure 3: Broker-dealer wealth share through time
+# ------------------------------------------------------------
+
+kargar_plot = kargar_data[
+    kargar_data["date"] >= "1990-01-01"
+].copy()
+
+fig, ax = plt.subplots(
+    figsize=(10, 5.5)
+)
+
+ax.plot(
+    kargar_plot["date"],
+    kargar_plot["BD_WEALTH_SHARE"],
+    linewidth=1.8,
+)
+
+ax.set_title(
+    "Broker-Dealer Share of Intermediary Equity"
+)
+
+ax.set_xlabel(
+    "Year"
+)
+
+ax.set_ylabel(
+    "Broker-Dealer Wealth Share"
+)
+
+# Financial crisis reference
+ax.axvspan(
+    pd.Timestamp("2007-12-01"),
+    pd.Timestamp("2009-06-30"),
+    alpha=0.12,
+)
+
+# COVID shock reference
+ax.axvspan(
+    pd.Timestamp("2020-02-01"),
+    pd.Timestamp("2020-06-30"),
+    alpha=0.12,
+)
+
+ax.text(
+    pd.Timestamp("2008-09-01"),
+    0.25,
+    "Global\nFinancial Crisis",
+    ha="center",
+    fontsize=9,
+)
+
+ax.text(
+    pd.Timestamp("2020-04-01"),
+    0.25,
+    "COVID",
+    ha="center",
+    fontsize=9,
+)
+
+fig.tight_layout()
+
+figure_3_path = (
+    FIGURE_DIR
+    / "v2_bd_wealth_share.png"
+)
+
+fig.savefig(
+    figure_3_path,
+    dpi=300,
+    bbox_inches="tight",
+)
+
+plt.close(fig)
+
+print()
+print(f"Saved Figure 3: {figure_3_path}")
